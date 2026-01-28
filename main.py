@@ -1,8 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from transformers import pipeline
-from PIL import Image
 import io
+import os
 
 app = FastAPI()
 
@@ -14,8 +13,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import os
-
 # Global variable to store the model
 model_pipeline = None
 
@@ -23,6 +20,7 @@ def get_model():
     global model_pipeline
     if model_pipeline is None:
         print("Loading model...")
+        from transformers import pipeline
         model_pipeline = pipeline(
             "image-classification",
             model="Saon110/fish-shrimp-disease-classifier",
@@ -33,6 +31,7 @@ def get_model():
 
 @app.post("/predict")
 async def predict_image(file: UploadFile = File(...)):
+    from PIL import Image
     # Read uploaded file
     contents = await file.read()
     image = Image.open(io.BytesIO(contents))
