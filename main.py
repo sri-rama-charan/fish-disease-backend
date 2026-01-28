@@ -14,15 +14,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("Loading model...")
+import os
 
-# Load your model using Hugging Face pipeline
-classifier = pipeline(
-    "image-classification",
-    model="Saon110/fish-shrimp-disease-classifier",
-)
+# Global variable to store the model
+model_pipeline = None
 
-print("Model loaded")
+def get_model():
+    global model_pipeline
+    if model_pipeline is None:
+        print("Loading model...")
+        model_pipeline = pipeline(
+            "image-classification",
+            model="Saon110/fish-shrimp-disease-classifier",
+            token=os.environ.get("HF_TOKEN")
+        )
+        print("Model loaded")
+    return model_pipeline
 
 @app.post("/predict")
 async def predict_image(file: UploadFile = File(...)):
@@ -31,6 +38,7 @@ async def predict_image(file: UploadFile = File(...)):
     image = Image.open(io.BytesIO(contents))
 
     # Run the model
+    classifier = get_model()
     preds = classifier(image)
 
     # Prepare results
