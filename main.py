@@ -1,11 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from huggingface_hub import InferenceClient
+from transformers import pipeline
 from PIL import Image
 import io
 import logging
-import os
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Fish Disease Classifier API")
 
-# CORS Configuration
+# CORS Configuration - Allow your frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -28,10 +28,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Hugging Face client
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # Optional for public models
-client = InferenceClient(token=HF_API_TOKEN) if HF_API_TOKEN else InferenceClient()
-MODEL_ID = "Saon110/fish-shrimp-disease-classifier"
+# Global variable for model
+classifier = None
+
+@app.on_event("startup")
+async def load_model():
+    """Load model on startup with aggressive memory optimization"""
+    global classifier
+    try:
+        logger.info("Loading model with memory optimization...")
+        import torch
+        import os
+        
+        # Set environment variables for memory optimization
+        os.environ['TRANSFORMERS_CACHE'] = '/tmp/transformers_cache'
+        os.environ['HF_HOME'] = '/tmp/hf_home'
+        
+        # Disable gradients globally to save memory
+        torch.set_grad_enabled(False)
+        
+        # Use CPU-only lightweight model loading
+        classifier = pipeline(
+            "image-classification",
+            model="Saon110/fish-shrimp-disease-classifier",
+            device=-1,  # Force CPU
+            torch_dtype=torch.float32,  # Use float32 for CPU
+            trust_remote_code=True
+        )
+        
+        # Free up any unused memory
+        import gc
+        gc.collect()
+        
+        logger.info("Model loaded successfully")
+    except Exception as e:
+        logger.error(f"Failed to load model: {str(e)}")
+        logger.error(traceback.format_exc())
 
 @app.get("/")
 async def root():
@@ -39,8 +71,8 @@ async def root():
     return JSONResponse(
         content={
             "status": "online",
-            "message": "Fish Disease Classifier API is running (using HF Inference API)",
-            "model_loaded": True
+            "message": "Fish Disease Classifier API is running",
+            "model_loaded": classifier is not None
         },
         headers={
             "Access-Control-Allow-Origin": "*",
@@ -52,8 +84,8 @@ async def health_check():
     """Detailed health check"""
     return JSONResponse(
         content={
-            "status": "healthy",
-            "model_loaded": True
+            "status": "healthy" if classifier else "model_not_loaded",
+            "model_loaded": classifier is not None
         },
         headers={
             "Access-Control-Allow-Origin": "*",
@@ -62,8 +94,15 @@ async def health_check():
 
 @app.post("/predict")
 async def predict_image(file: UploadFile = File(...)):
-    """Predict fish disease from uploaded image using HF Inference Client"""
+    """Predict fish disease from uploaded image"""
     try:
+        # Check if model is loaded
+        if classifier is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Model not loaded yet. Please wait and try again."
+            )
+        
         # Validate file type
         if not file.content_type.startswith('image/'):
             raise HTTPException(
@@ -75,37 +114,16 @@ async def predict_image(file: UploadFile = File(...)):
         
         # Read uploaded file
         contents = await file.read()
-        
-        # Convert bytes to PIL Image for HF client
         image = Image.open(io.BytesIO(contents))
         
-        # Call Hugging Face using the client library
-        logger.info(f"Calling HF model: {MODEL_ID}")
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
-        try:
-            # Use image_classification method with PIL Image
-            preds = client.image_classification(image, model=MODEL_ID)
-            logger.info(f"Predictions received: {preds}")
-            
-        except Exception as hf_error:
-            error_msg = str(hf_error)
-            logger.error(f"HF API error: {error_msg}")
-            
-            if "loading" in error_msg.lower():
-                raise HTTPException(
-                    status_code=503,
-                    detail="Model is loading. Please try again in 20 seconds."
-                )
-            elif "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
-                raise HTTPException(
-                    status_code=503,
-                    detail="Model access error. The model may require authentication."
-                )
-            else:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Model API error: {error_msg}"
-                )
+        # Run the model
+        logger.info("Running prediction...")
+        preds = classifier(image)
+        logger.info(f"Predictions: {preds}")
         
         # Prepare results
         fish_preds = [
@@ -114,6 +132,7 @@ async def predict_image(file: UploadFile = File(...)):
         ]
         
         if not fish_preds:
+            # If no fish predictions, return top prediction anyway
             top_prediction = preds[0] if preds else None
             if not top_prediction:
                 raise HTTPException(
@@ -146,6 +165,7 @@ async def predict_image(file: UploadFile = File(...)):
         raise
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
             detail=f"Error processing image: {str(e)}"
