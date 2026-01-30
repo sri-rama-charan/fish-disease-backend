@@ -76,12 +76,15 @@ async def predict_image(file: UploadFile = File(...)):
         # Read uploaded file
         contents = await file.read()
         
+        # Convert bytes to PIL Image for HF client
+        image = Image.open(io.BytesIO(contents))
+        
         # Call Hugging Face using the client library
         logger.info(f"Calling HF model: {MODEL_ID}")
         
         try:
-            # Use image_classification method with raw bytes
-            preds = client.image_classification(contents, model=MODEL_ID)
+            # Use image_classification method with PIL Image
+            preds = client.image_classification(image, model=MODEL_ID)
             logger.info(f"Predictions received: {preds}")
             
         except Exception as hf_error:
