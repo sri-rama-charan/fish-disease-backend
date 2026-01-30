@@ -1,11 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from huggingface_hub import InferenceClient
 from PIL import Image
 import io
 import logging
-import requests
-import base64
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Hugging Face API endpoint (new router URL)
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/Saon110/fish-shrimp-disease-classifier"
-HF_API_TOKEN = None  # Optional: Add your HF token for faster inference
-HF_USER_AGENT = "fish-disease-backend/1.0"
+# Hugging Face client
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # Optional for public models
+client = InferenceClient(token=HF_API_TOKEN) if HF_API_TOKEN else InferenceClient()
+MODEL_ID = "Saon110/fish-shrimp-disease-classifier"
 
 @app.get("/")
 async def root():
@@ -62,7 +62,7 @@ async def health_check():
 
 @app.post("/predict")
 async def predict_image(file: UploadFile = File(...)):
-    """Predict fish disease from uploaded image using HF Inference API"""
+    """Predict fish disease from uploaded image using HF Inference Client"""
     try:
         # Validate file type
         if not file.content_type.startswith('image/'):
@@ -76,33 +76,33 @@ async def predict_image(file: UploadFile = File(...)):
         # Read uploaded file
         contents = await file.read()
         
-        # Call Hugging Face Inference API
-        headers = {"User-Agent": HF_USER_AGENT}
-        if HF_API_TOKEN:
-            headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
+        # Call Hugging Face using the client library
+        logger.info(f"Calling HF model: {MODEL_ID}")
         
-        response = requests.post(
-            HF_API_URL,
-            headers=headers,
-            data=contents,
-            timeout=30
-        )
-        
-        if response.status_code == 503:
-            raise HTTPException(
-                status_code=503,
-                detail="Model is loading on Hugging Face servers. Please try again in 20 seconds."
-            )
-        
-        if response.status_code != 200:
-            logger.error(f"HF API error: {response.status_code} - {response.text}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error from model API: {response.text}"
-            )
-        
-        preds = response.json()
-        logger.info(f"Predictions: {preds}")
+        try:
+            # Use image_classification method with raw bytes
+            preds = client.image_classification(contents, model=MODEL_ID)
+            logger.info(f"Predictions received: {preds}")
+            
+        except Exception as hf_error:
+            error_msg = str(hf_error)
+            logger.error(f"HF API error: {error_msg}")
+            
+            if "loading" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Model is loading. Please try again in 20 seconds."
+                )
+            elif "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Model access error. The model may require authentication."
+                )
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Model API error: {error_msg}"
+                )
         
         # Prepare results
         fish_preds = [
