@@ -28,9 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Hugging Face API endpoint
-HF_API_URL = "https://api-inference.huggingface.co/models/Saon110/fish-shrimp-disease-classifier"
+# Hugging Face API endpoint (new router URL)
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/Saon110/fish-shrimp-disease-classifier"
 HF_API_TOKEN = None  # Optional: Add your HF token for faster inference
+HF_USER_AGENT = "fish-disease-backend/1.0"
 
 @app.get("/")
 async def root():
@@ -76,7 +77,7 @@ async def predict_image(file: UploadFile = File(...)):
         contents = await file.read()
         
         # Call Hugging Face Inference API
-        headers = {}
+        headers = {"User-Agent": HF_USER_AGENT}
         if HF_API_TOKEN:
             headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
         
