@@ -1,12 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from transformers import pipeline
 from PIL import Image
 import io
 import logging
 import traceback
-import os
-import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,9 +28,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# HuggingFace configuration
-HF_API_URL = "https://api-inference.huggingface.co/models/Saon110/fish-shrimp-disease-classifier"
-HF_TOKEN = os.getenv('HF_TOKEN')
+# Global variable for model
+classifier = None
+
+@app.on_event("startup")
+async def load_model():
+    """Load model on startup with aggressive memory optimization"""
+    global classifier
+    try:
+        logger.info("Loading model with memory optimization...")
+        import torch
+        import os
+        from huggingface_hub import login
+        
+        # Authenticate with Hugging Face
+        hf_token = os.getenv('HF_TOKEN')
+        if hf_token:
+            login(token=hf_token)
+            logger.info("Successfully authenticated with Hugging Face")
+        else:
+            logger.warning("No HF_TOKEN found in environment variables, proceeding without authentication")
+        
+        # Set environment variables for memory optimization
+        os.environ['TRANSFORMERS_CACHE'] = '/tmp/transformers_cache'
+        os.environ['HF_HOME'] = '/tmp/hf_home'
+        
+        # Disable gradients globally to save memory
+        torch.set_grad_enabled(False)
+        
+        # Use CPU-only lightweight model loading
+        classifier = pipeline(
+            "image-classification",
+            model="Saon110/fish-shrimp-disease-classifier",
+            device=-1,  # Force CPU
+            torch_dtype=torch.float32,  # Use float32 for CPU
+            trust_remote_code=True
+        )
+        
+        # Free up any unused memory
+        import gc
+        gc.collect()
+        
+        logger.info("Model loaded successfully")
+    except Exception as e:
+        logger.error(f"Failed to load model: {str(e)}")
+        logger.error(traceback.format_exc())
 
 @app.get("/")
 async def root():
@@ -40,8 +81,7 @@ async def root():
         content={
             "status": "online",
             "message": "Fish Disease Classifier API is running",
-            "model_loaded": True,
-            "using": "HuggingFace Inference API"
+            "model_loaded": classifier is not None
         },
         headers={
             "Access-Control-Allow-Origin": "*",
@@ -53,9 +93,8 @@ async def health_check():
     """Detailed health check"""
     return JSONResponse(
         content={
-            "status": "healthy",
-            "model_loaded": True,
-            "using": "HuggingFace Inference API"
+            "status": "healthy" if classifier else "model_not_loaded",
+            "model_loaded": classifier is not None
         },
         headers={
             "Access-Control-Allow-Origin": "*",
@@ -64,8 +103,15 @@ async def health_check():
 
 @app.post("/predict")
 async def predict_image(file: UploadFile = File(...)):
-    """Predict fish disease from uploaded image using HuggingFace Inference API"""
+    """Predict fish disease from uploaded image"""
     try:
+        # Check if model is loaded
+        if classifier is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Model not loaded yet. Please wait and try again."
+            )
+        
         # Validate file type
         if not file.content_type.startswith('image/'):
             raise HTTPException(
@@ -83,32 +129,9 @@ async def predict_image(file: UploadFile = File(...)):
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Convert image to bytes for API
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='JPEG')
-        img_byte_arr = img_byte_arr.getvalue()
-        
-        # Call HuggingFace Inference API
-        headers = {}
-        if HF_TOKEN:
-            headers["Authorization"] = f"Bearer {HF_TOKEN}"
-        
-        logger.info("Calling HuggingFace Inference API...")
-        response = requests.post(
-            HF_API_URL,
-            headers=headers,
-            data=img_byte_arr,
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"HuggingFace API error: {response.status_code} - {response.text}")
-            raise HTTPException(
-                status_code=503,
-                detail=f"Model inference failed: {response.text}"
-            )
-        
-        preds = response.json()
+        # Run the model
+        logger.info("Running prediction...")
+        preds = classifier(image)
         logger.info(f"Predictions: {preds}")
         
         # Prepare results
