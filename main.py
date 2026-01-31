@@ -39,6 +39,15 @@ async def load_model():
         logger.info("Loading model with memory optimization...")
         import torch
         import os
+        from huggingface_hub import login
+        
+        # Authenticate with Hugging Face
+        hf_token = os.getenv('HF_TOKEN')
+        if hf_token:
+            login(token=hf_token)
+            logger.info("Successfully authenticated with Hugging Face")
+        else:
+            logger.warning("No HF_TOKEN found in environment variables, proceeding without authentication")
         
         # Set environment variables for memory optimization
         os.environ['TRANSFORMERS_CACHE'] = '/tmp/transformers_cache'

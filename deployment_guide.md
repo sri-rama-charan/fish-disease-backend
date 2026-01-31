@@ -1,7 +1,9 @@
 # Complete Deployment Guide - Fish Disease Detector
 
 ## Overview
+
 You have **TWO** separate repositories that need to be deployed:
+
 1. **Backend** (FastAPI/Python) - `fish_disease_backend` folder
 2. **Frontend** (React/Vite) - `aqua-health-pro` folder (current)
 
@@ -10,6 +12,7 @@ You have **TWO** separate repositories that need to be deployed:
 ## STEP 1: Deploy Backend First
 
 ### What to Deploy
+
 - Folder: `C:\projects\fish_disease_backend`
 - Contains: FastAPI app, ML model, Python dependencies
 
@@ -39,18 +42,68 @@ You have **TWO** separate repositories that need to be deployed:
    - Click **New → Web Service**
    - Connect your GitHub repo (or upload backend folder)
    - Settings:
+3. **Prepare Backend for Deployment**
+   - Go to backend folder: `cd C:\projects\fish_disease_backend`
+   - Create `requirements.txt` if not exists:
+     ```bash
+     pip freeze > requirements.txt
+     ```
+   - Create `render.yaml`:
+     ```yaml
+     services:
+       - type: web
+         name: fish-disease-api
+         runtime: python
+         buildCommand: pip install -r requirements.txt
+         startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+     ```
+
+4. **Deploy to Render**
+   - Go to https://render.com
+   - Sign up/Login with GitHub
+   - Click **New → Web Service**
+   - Connect your GitHub repo (or upload backend folder)
+   - Settings:
      - **Runtime:** Python 3
      - **Build Command:** `pip install -r requirements.txt`
      - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+     - **Environment Variables** (Important!):
+       - Click **Add Environment Variable**
+       - **Key:** `HF_TOKEN`
+       - **Value:** Your Hugging Face token (starts with `hf_...`)
    - Click **Create Web Service**
 
-3. **Get Your Backend URL**
+5. **Get Your Backend URL**
    - After deployment: `https://fish-disease-api.onrender.com`
    - Test it: `https://fish-disease-api.onrender.com/docs`
 
+### Running Locally
+
+To run the backend locally, you need to set the HF_TOKEN environment variable:
+
+**Windows (PowerShell):**
+
+```powershell
+$env:HF_TOKEN="your_token_here"
+uvicorn main:app --reload
+```
+
+**Windows (Command Prompt):**
+
+```cmd
+set HF_TOKEN=your_token_here
+uvicorn main:app --reload
+```
+
+**Linux/Mac:**
+
+```bash
+export HF_TOKEN=your_token_here
+uvicorn main:app --reload
+```
+
 #### Option B: Railway.app
 
-1. Go to https://railway.app
 2. Click **Start a New Project → Deploy from GitHub**
 3. Select backend repository
 4. Railway auto-detects Python
@@ -70,6 +123,7 @@ You have **TWO** separate repositories that need to be deployed:
 ## STEP 2: Deploy Frontend
 
 ### What to Deploy
+
 - Folder: `C:\projects\aqua-health-pro` (current folder)
 - Contains: React app built with Vite
 
@@ -83,9 +137,11 @@ You have **TWO** separate repositories that need to be deployed:
    - Replace with YOUR actual backend URL from Step 1
 
 2. **Build the App**
+
    ```bash
    npm run build
    ```
+
    - This creates a `dist/` folder with optimized files
 
 ### Best Free Options for Frontend
@@ -100,7 +156,7 @@ You have **TWO** separate repositories that need to be deployed:
    - **Framework:** Vite
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
-   - **Environment Variable:** 
+   - **Environment Variable:**
      - Name: `VITE_API_URL`
      - Value: `https://fish-disease-api.onrender.com` (your backend URL)
 6. Click **Deploy**
@@ -122,11 +178,13 @@ You have **TWO** separate repositories that need to be deployed:
 #### Option C: GitHub Pages
 
 1. Install gh-pages:
+
    ```bash
    npm install -D gh-pages
    ```
 
 2. Add to `package.json`:
+
    ```json
    "scripts": {
      "predeploy": "npm run build",
@@ -135,6 +193,7 @@ You have **TWO** separate repositories that need to be deployed:
    ```
 
 3. Deploy:
+
    ```bash
    npm run deploy
    ```
@@ -148,20 +207,24 @@ You have **TWO** separate repositories that need to be deployed:
 After both are deployed:
 
 1. **Update `.env.production`**
+
    ```bash
    VITE_API_URL=https://fish-disease-api.onrender.com
    ```
 
 2. **Rebuild Everything**
+
    ```bash
    npm run build
    npx cap sync android
    ```
 
 3. **Generate APK**
+
    ```bash
    npx cap open android
    ```
+
    - Build → Build APK
 
 ---
@@ -170,10 +233,10 @@ After both are deployed:
 
 ### What You Deploy:
 
-| Component | What | Where | URL Example |
-|-----------|------|-------|-------------|
-| **Backend** | `fish_disease_backend` folder | Render/Railway | `https://your-api.onrender.com` |
-| **Frontend** | `aqua-health-pro` folder (this) | Vercel/Netlify | `https://your-app.vercel.app` |
+| Component    | What                            | Where          | URL Example                     |
+| ------------ | ------------------------------- | -------------- | ------------------------------- |
+| **Backend**  | `fish_disease_backend` folder   | Render/Railway | `https://your-api.onrender.com` |
+| **Frontend** | `aqua-health-pro` folder (this) | Vercel/Netlify | `https://your-app.vercel.app`   |
 
 ### Order of Operations:
 
@@ -214,6 +277,7 @@ After both are deployed:
 ## Need Help?
 
 If you get stuck:
+
 1. Check backend is deployed: Visit `your-backend-url.com/docs`
 2. Check frontend env vars: `.env.production` has correct backend URL
 3. Rebuild after changes: `npm run build && npx cap sync android`
